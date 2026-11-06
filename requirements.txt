@@ -1,0 +1,22 @@
+# Core LLM & Agent Framework
+langchain==0.3.7
+langchain-openai==0.2.8
+langgraph==0.2.45
+langsmith==0.1.147
+pydantic==2.9.2
+
+# Web Search Tool
+tavily-python==0.5.0
+
+# Vector Store
+chromadb==0.5.15
+
+# Web UI
+streamlit==1.39.0
+
+# PDF Export
+reportlab==4.2.5
+
+# Utilities
+python-dotenv==1.0.1
+requests==2.32.3
