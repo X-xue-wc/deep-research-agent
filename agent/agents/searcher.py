@@ -1,13 +1,11 @@
 """
 搜索智能体：执行具体的搜索任务，收集资料
-升级：加引用校验 + 向量库复用
+简化版：先确保核心流程跑通
 """
 from langchain_core.messages import SystemMessage, HumanMessage
 from agent.llm import get_llm
 from agent.state import AgentState, TaskResult, ResearchTask, SearchResult
 from agent.tools.search import search_web
-from agent.tools.verify import verify_sources
-from agent.tools.vectorstore import search_vectorstore, store_search_results
 
 
 SEARCHER_SYSTEM_PROMPT = """你是一个研究助理。给定一个研究问题和搜索结果，
@@ -52,23 +50,13 @@ def _normal_search(state: AgentState) -> dict:
 
     for query in task.search_queries:
         print(f"  搜索: {query}")
-
-        # 先查向量库有没有缓存
-        cached = search_vectorstore(query)
-        if cached:
-            all_sources.extend(cached)
-        else:
-            results = search_web(query, max_results=3)
-            # 校验 URL
-            verified = verify_sources(results)
-            all_sources.extend(verified)
-            # 存入向量库
-            store_search_results(query, verified)
+        results = search_web(query, max_results=3)
+        all_sources.extend(results)
 
         # 总结搜索结果
         results_text = "\n".join([
             f"标题: {r.title}\n内容: {r.content}"
-            for r in all_sources[-3:]
+            for r in results
         ])
 
         llm = get_llm(temperature=0.1)
@@ -101,16 +89,15 @@ def _followup_search(state: AgentState) -> dict:
 
     print(f"[Searcher] 补充搜索 {len(suggestions)} 个问题...")
 
+    new_tasks = []
     for i, query in enumerate(suggestions):
         print(f"  补充搜索: {query}")
         results = search_web(query, max_results=3)
-        verified = verify_sources(results)
-        store_search_results(query, verified)
 
         # 总结
         results_text = "\n".join([
             f"标题: {r.title}\n内容: {r.content}"
-            for r in verified
+            for r in results
         ])
 
         llm = get_llm(temperature=0.1)
@@ -119,18 +106,18 @@ def _followup_search(state: AgentState) -> dict:
             HumanMessage(content=f"补充研究问题: {query}\n\n搜索结果:\n{results_text}"),
         ])
 
-        # 加到任务结果里
         new_task = TaskResult(
-            task_id=100 + i,  # 100+ 编号表示补充任务
+            task_id=100 + i,
             question=query,
             findings=response.content,
-            sources=verified,
+            sources=results,
         )
+        new_tasks.append(new_task)
 
     print(f"[Searcher] 补充搜索完成")
 
     return {
-        "task_results": state.task_results + [new_task],
+        "task_results": state.task_results + new_tasks,
     }
 
 

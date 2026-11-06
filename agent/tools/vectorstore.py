@@ -23,7 +23,7 @@ def get_vectorstore():
 
     # 本地持久化存储
     persist_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", ".chroma")
-    persist_dir = os.path.abspath(persist)
+    persist_dir = os.path.abspath(persist_dir)
 
     _client = chromadb.PersistentClient(path=persist_dir)
 

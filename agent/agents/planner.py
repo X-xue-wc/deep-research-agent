@@ -2,6 +2,7 @@
 规划智能体：分析用户需求，拆解研究任务
 这是整个系统的"大脑"
 """
+import json
 from langchain_core.messages import SystemMessage, HumanMessage
 from agent.llm import get_llm
 from agent.state import AgentState, ResearchPlan
@@ -19,7 +20,19 @@ PLANNER_SYSTEM_PROMPT = """你是一个专业的研究规划专家。你的任�
 - 子问题要相互独立，合起来又能覆盖完整主题
 - 搜索关键词要具体，不要太泛
 - 大纲要有逻辑层次，符合学术报告规范
-- 输出必须符合给定的 JSON 格式"""
+
+输出格式：严格的 JSON 格式，不要有任何其他文字。格式如下：
+{
+  "topic": "研究主题",
+  "outline": "报告大纲（用换行符分隔）",
+  "tasks": [
+    {
+      "id": 1,
+      "question": "子问题1",
+      "search_queries": ["关键词1", "关键词2"]
+    }
+  ]
+}"""
 
 
 def planner_node(state: AgentState) -> dict:
@@ -32,15 +45,26 @@ def planner_node(state: AgentState) -> dict:
 
     llm = get_llm(temperature=0.2)
 
-    # 让 LLM 直接输出结构化的 ResearchPlan 对象
-    structured_llm = llm.with_structured_output(ResearchPlan)
-
     messages = [
         SystemMessage(content=PLANNER_SYSTEM_PROMPT),
         HumanMessage(content=f"研究主题：{state.user_query}"),
     ]
 
-    plan = structured_llm.invoke(messages)
+    response = llm.invoke(messages)
+    content = response.content
+
+    # 解析 JSON（去掉可能的 markdown 代码块标记）
+    content = content.strip()
+    if content.startswith("```json"):
+        content = content[7:]
+    if content.startswith("```"):
+        content = content[3:]
+    if content.endswith("```"):
+        content = content[:-3]
+    content = content.strip()
+
+    plan_data = json.loads(content)
+    plan = ResearchPlan(**plan_data)
 
     print(f"[Planner] 规划完成，拆解出 {len(plan.tasks)} 个任务")
     for t in plan.tasks:

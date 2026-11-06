@@ -2,6 +2,7 @@
 反思智能体：评估搜索结果是否充足，提出补充搜索建议
 这是提升研究质量的关键环节
 """
+import json
 from langchain_core.messages import SystemMessage, HumanMessage
 from agent.llm import get_llm
 from agent.state import AgentState, ReflectionResult
@@ -17,10 +18,14 @@ REFLECT_SYSTEM_PROMPT = """你是一个研究质量评审专家。
 3. 深度：是否有足够的细节和数据支撑？
 4. 平衡性：是否有不同角度的观点？
 
-输出要求：
-- 如果材料基本充足，overall_sufficient = true
-- 如果有明显缺口，列出 gaps 和需要补充搜索的 suggestions
-- 最多提出 3 个补充搜索建议，不要太多"""
+输出格式：严格的 JSON 格式，不要有任何其他文字。格式如下：
+{
+  "overall_sufficient": true 或 false,
+  "gaps": ["发现的缺口1", "缺口2"],
+  "suggestions": ["补充搜索建议1", "建议2"]
+}
+
+注意：最多提出 3 个补充搜索建议。"""
 
 
 def reflect_node(state: AgentState) -> dict:
@@ -35,7 +40,6 @@ def reflect_node(state: AgentState) -> dict:
     materials_text = "\n\n".join(materials)
 
     llm = get_llm(temperature=0.2)
-    structured_llm = llm.with_structured_output(ReflectionResult)
 
     messages = [
         SystemMessage(content=REFLECT_SYSTEM_PROMPT),
@@ -46,7 +50,20 @@ def reflect_node(state: AgentState) -> dict:
         )),
     ]
 
-    reflection = structured_llm.invoke(messages)
+    response = llm.invoke(messages)
+    content = response.content.strip()
+
+    # 解析 JSON
+    if content.startswith("```json"):
+        content = content[7:]
+    if content.startswith("```"):
+        content = content[3:]
+    if content.endswith("```"):
+        content = content[:-3]
+    content = content.strip()
+
+    reflection_data = json.loads(content)
+    reflection = ReflectionResult(**reflection_data)
 
     if reflection.overall_sufficient:
         print(f"[Reflector] 材料充足，可以写作")

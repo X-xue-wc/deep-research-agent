@@ -2,12 +2,17 @@
 Streamlit 界面：和 Agent 对话的窗口
 升级：显示反思进度 + PDF 导出
 """
+import os
+from dotenv import load_dotenv
+
+# 最开头强制加载 .env，覆盖系统环境变量
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
+
 import streamlit as st
 from agent.graph import agent_app
 from agent.state import AgentState
 from agent.tools.pdf_export import markdown_to_pdf
 import tempfile
-import os
 
 st.set_page_config(page_title="Deep Research Agent", page_icon="🔬", layout="wide")
 
@@ -44,33 +49,53 @@ if run_button and user_query:
     report_placeholder = st.empty()
 
     for event in agent_app.stream(initial_state, stream_mode="values"):
-        state: AgentState = event
+        # LangGraph stream 返回的 state 里，有些字段是 Pydantic 对象，有些是 dict
+        state = event
+
+        # 统一把字段转成方便访问的格式
+        def _get_field(obj, key, default=None):
+            """兼容 Pydantic 对象和 dict 的字段访问"""
+            if obj is None:
+                return default
+            if hasattr(obj, key):
+                return getattr(obj, key)
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return default
+
+        research_plan = state.get("research_plan")
+        reflection = state.get("reflection")
+        current_task_idx = state.get("current_task_idx", 0)
+        final_report = state.get("final_report")
+        reflection_round = state.get("reflection_round", 0)
 
         # 实时更新进度
-        if state.research_plan is None:
+        if research_plan is None:
             progress_placeholder.info("🧠 规划智能体正在分析研究主题...")
 
-        elif state.reflection is None:
-            if state.current_task_idx < len(state.research_plan.tasks):
+        elif reflection is None:
+            tasks = _get_field(research_plan, "tasks", [])
+            if current_task_idx < len(tasks):
                 progress_placeholder.info(
                     f"🔍 搜索智能体正在研究... "
-                    f"({state.current_task_idx}/{len(state.research_plan.tasks)} 个任务)"
+                    f"({current_task_idx}/{len(tasks)} 个任务)"
                 )
             else:
                 progress_placeholder.info("🔍 搜索完成，准备反思...")
 
-        elif state.final_report is None:
-            if not state.reflection.overall_sufficient:
+        elif final_report is None:
+            overall_sufficient = _get_field(reflection, "overall_sufficient", False)
+            if not overall_sufficient:
                 progress_placeholder.info(
                     f"💡 反思智能体发现缺口，正在补充搜索... "
-                    f"(第 {state.reflection_round} 轮)"
+                    f"(第 {reflection_round} 轮)"
                 )
             else:
                 progress_placeholder.info("✍️ 写作智能体正在撰写报告...")
 
         else:
             progress_placeholder.success("✅ 研究完成！")
-            report_placeholder.markdown(state.final_report)
+            report_placeholder.markdown(final_report)
 
             # 下载按钮区
             st.divider()
@@ -81,7 +106,7 @@ if run_button and user_query:
             with col_md:
                 st.download_button(
                     label="📄 下载 Markdown",
-                    data=state.final_report,
+                    data=final_report,
                     file_name="research_report.md",
                     mime="text/markdown",
                     use_container_width=True,
@@ -92,7 +117,7 @@ if run_button and user_query:
                 try:
                     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
                         pdf_path = tmp.name
-                    markdown_to_pdf(state.final_report, pdf_path)
+                    markdown_to_pdf(final_report, pdf_path)
                     with open(pdf_path, "rb") as f:
                         pdf_bytes = f.read()
                     st.download_button(
